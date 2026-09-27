@@ -1,40 +1,38 @@
-from datetime import datetime
-
-from flask import Flask, jsonify, request
-
-app = Flask(__name__)
+import asyncio
+from datetime import datetime, timezone
+from aiohttp import web
 
 announcements = {}
 id_counter = 0
 
 
-@app.route("/api/announcements", methods=["GET"])
-def get_announcements():
-    return jsonify(list(announcements.values())), 200
+async def get_announcements(request):
+    return web.json_response(list(announcements.values()))
 
 
-@app.route("/api/announcements/<int:announcement_id>", methods=["GET"])
-def get_announcement(announcement_id):
+async def get_announcement(request):
+    announcement_id = int(request.match_info["id"])
     announcement = announcements.get(announcement_id)
     if not announcement:
-        return jsonify({"error": "Announcement not found"}), 404
-    return jsonify(announcement), 200
+        return web.json_response({"error": "Announcement not found"}, status=404)
+    return web.json_response(announcement)
 
 
-@app.route("/api/announcements", methods=["POST"])
-def create_announcement():
-    data = request.get_json()
+async def create_announcement(request):
+    global id_counter
+    data = await request.json()
     if not data:
-        return jsonify({"error": "No input data provided"}), 400
+        return web.json_response({"error": "No input data provided"}, status=400)
 
     title = data.get("title")
     description = data.get("description")
     owner = data.get("owner")
 
     if not title or not description or not owner:
-        return jsonify({"error": "Title, description, and owner are required"}), 400
+        return web.json_response(
+            {"error": "Title, description, and owner are required"}, status=400
+        )
 
-    global id_counter
     id_counter += 1
     announcement_id = id_counter
     announcement = {
@@ -42,21 +40,21 @@ def create_announcement():
         "title": title,
         "description": description,
         "owner": owner,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
     announcements[announcement_id] = announcement
-    return jsonify(announcement), 201
+    return web.json_response(announcement, status=201)
 
 
-@app.route("/api/announcements/<int:announcement_id>", methods=["PUT"])
-def update_announcement(announcement_id):
+async def update_announcement(request):
+    announcement_id = int(request.match_info["id"])
     announcement = announcements.get(announcement_id)
     if not announcement:
-        return jsonify({"error": "Announcement not found"}), 404
+        return web.json_response({"error": "Announcement not found"}, status=404)
 
-    data = request.get_json()
+    data = await request.json()
     if not data:
-        return jsonify({"error": "No input data provided"}), 400
+        return web.json_response({"error": "No input data provided"}, status=400)
 
     if "title" in data:
         announcement["title"] = data["title"]
@@ -65,18 +63,31 @@ def update_announcement(announcement_id):
     if "owner" in data:
         announcement["owner"] = data["owner"]
 
-    return jsonify(announcement), 200
+    return web.json_response(announcement)
 
 
-@app.route("/api/announcements/<int:announcement_id>", methods=["DELETE"])
-def delete_announcement(announcement_id):
+async def delete_announcement(request):
+    announcement_id = int(request.match_info["id"])
     announcement = announcements.get(announcement_id)
     if not announcement:
-        return jsonify({"error": "Announcement not found"}), 404
+        return web.json_response({"error": "Announcement not found"}, status=404)
 
     del announcements[announcement_id]
-    return "", 204
+    return web.Response(status=204)
+
+
+def create_app():
+    loop = asyncio.new_event_loop()
+
+    app = web.Application()
+    app.router.add_get("/api/announcements", get_announcements)
+    app.router.add_get("/api/announcements/{id}", get_announcement)
+    app.router.add_post("/api/announcements", create_announcement)
+    app.router.add_put("/api/announcements/{id}", update_announcement)
+    app.router.add_delete("/api/announcements/{id}", delete_announcement)
+
+    return app
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    web.run_app(create_app(), host="0.0.0.0", port=8080)
