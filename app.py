@@ -1,50 +1,68 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 from aiohttp import web
+import aiofiles
+import os
+
+DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "announcements.json")
 
 
 class AsyncAnnouncementStore:
-    def __init__(self):
+    def __init__(self, filepath):
+        self._filepath = filepath
         self._data = {}
         self._counter = 0
-        self._lock = asyncio.Lock()
+        self._load_data()
+
+    def _load_data(self):
+        if os.path.exists(self._filepath):
+            with open(self._filepath, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:
+                    loaded = json.loads(content)
+                    for item in loaded:
+                        self._data[item["id"]] = item
+                        if item["id"] >= self._counter:
+                            self._counter = item["id"]
+
+    async def _save(self):
+        async with aiofiles.open(self._filepath, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(list(self._data.values()), ensure_ascii=False, indent=2))
 
     async def get(self, announcement_id):
-        async with self._lock:
-            return self._data.get(announcement_id)
+        return self._data.get(announcement_id)
 
     async def get_all(self):
-        async with self._lock:
-            return list(self._data.values())
+        return list(self._data.values())
 
     async def create(self, announcement):
-        async with self._lock:
-            self._counter += 1
-            announcement_id = self._counter
-            self._data[announcement_id] = announcement
-            return announcement_id
+        self._counter += 1
+        announcement_id = self._counter
+        self._data[announcement_id] = announcement
+        await self._save()
+        return announcement_id
 
     async def update(self, announcement_id, data):
-        async with self._lock:
-            if announcement_id not in self._data:
-                return None
-            for key, value in data.items():
-                self._data[announcement_id][key] = value
-            return self._data[announcement_id]
+        if announcement_id not in self._data:
+            return None
+        for key, value in data.items():
+            self._data[announcement_id][key] = value
+        await self._save()
+        return self._data[announcement_id]
 
     async def delete(self, announcement_id):
-        async with self._lock:
-            if announcement_id not in self._data:
-                return None
-            announcement = self._data.pop(announcement_id)
-            return announcement
+        if announcement_id not in self._data:
+            return None
+        announcement = self._data.pop(announcement_id)
+        await self._save()
+        return announcement
 
     async def get_all_ids(self):
-        async with self._lock:
-            return list(self._data.keys())
+        return list(self._data.keys())
 
 
-store = AsyncAnnouncementStore()
+store = AsyncAnnouncementStore(DATA_FILE)
 
 
 async def get_announcements(request):
