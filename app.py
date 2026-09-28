@@ -2,27 +2,65 @@ import asyncio
 from datetime import datetime, timezone
 from aiohttp import web
 
-announcements = {}
-id_counter = 0
-lock = asyncio.Lock()
+
+class AsyncAnnouncementStore:
+    def __init__(self):
+        self._data = {}
+        self._counter = 0
+        self._lock = asyncio.Lock()
+
+    async def get(self, announcement_id):
+        async with self._lock:
+            return self._data.get(announcement_id)
+
+    async def get_all(self):
+        async with self._lock:
+            return list(self._data.values())
+
+    async def create(self, announcement):
+        async with self._lock:
+            self._counter += 1
+            announcement_id = self._counter
+            self._data[announcement_id] = announcement
+            return announcement_id
+
+    async def update(self, announcement_id, data):
+        async with self._lock:
+            if announcement_id not in self._data:
+                return None
+            for key, value in data.items():
+                self._data[announcement_id][key] = value
+            return self._data[announcement_id]
+
+    async def delete(self, announcement_id):
+        async with self._lock:
+            if announcement_id not in self._data:
+                return None
+            announcement = self._data.pop(announcement_id)
+            return announcement
+
+    async def get_all_ids(self):
+        async with self._lock:
+            return list(self._data.keys())
+
+
+store = AsyncAnnouncementStore()
 
 
 async def get_announcements(request):
-    async with lock:
-        return web.json_response(list(announcements.values()))
+    announcements = await store.get_all()
+    return web.json_response(announcements)
 
 
 async def get_announcement(request):
     announcement_id = int(request.match_info["id"])
-    async with lock:
-        announcement = announcements.get(announcement_id)
+    announcement = await store.get(announcement_id)
     if not announcement:
         return web.json_response({"error": "Announcement not found"}, status=404)
     return web.json_response(announcement)
 
 
 async def create_announcement(request):
-    global id_counter
     data = await request.json()
     if not data:
         return web.json_response({"error": "No input data provided"}, status=400)
@@ -36,25 +74,22 @@ async def create_announcement(request):
             {"error": "Title, description, and owner are required"}, status=400
         )
 
-    async with lock:
-        id_counter += 1
-        announcement_id = id_counter
-        announcement = {
-            "id": announcement_id,
-            "title": title,
-            "description": description,
-            "owner": owner,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        announcements[announcement_id] = announcement
+    announcement = {
+        "id": 0,
+        "title": title,
+        "description": description,
+        "owner": owner,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    announcement_id = await store.create(announcement)
+    announcement["id"] = announcement_id
 
     return web.json_response(announcement, status=201)
 
 
 async def update_announcement(request):
     announcement_id = int(request.match_info["id"])
-    async with lock:
-        announcement = announcements.get(announcement_id)
+    announcement = await store.get(announcement_id)
     if not announcement:
         return web.json_response({"error": "Announcement not found"}, status=404)
 
@@ -75,24 +110,15 @@ async def update_announcement(request):
             {"error": "Owner cannot be empty"}, status=400
         )
 
-    async with lock:
-        if "title" in data:
-            announcement["title"] = data["title"]
-        if "description" in data:
-            announcement["description"] = data["description"]
-        if "owner" in data:
-            announcement["owner"] = data["owner"]
+    updated = await store.update(announcement_id, data)
 
-    return web.json_response(announcement)
+    return web.json_response(updated)
 
 
 async def delete_announcement(request):
     announcement_id = int(request.match_info["id"])
-    async with lock:
-        announcement = announcements.get(announcement_id)
-        if announcement:
-            del announcements[announcement_id]
-    if not announcement:
+    deleted = await store.delete(announcement_id)
+    if not deleted:
         return web.json_response({"error": "Announcement not found"}, status=404)
     return web.Response(status=204)
 
