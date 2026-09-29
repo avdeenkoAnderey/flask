@@ -1,11 +1,12 @@
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 from aiohttp import web
 import aiofiles
-import os
 
-DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "announcements.json")
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
+DATA_FILE = os.path.join(DATA_DIR, "announcements.json")
 
 
 class AsyncAnnouncementStore:
@@ -13,6 +14,7 @@ class AsyncAnnouncementStore:
         self._filepath = filepath
         self._data = {}
         self._counter = 0
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
         self._load_data()
 
     def _load_data(self):
